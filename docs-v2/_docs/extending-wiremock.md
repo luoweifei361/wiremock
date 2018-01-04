@@ -77,7 +77,7 @@ public static class ExampleTransformer extends ResponseDefinitionTransformer {
         }
 
         @Override
-        public String name() {
+        public String getName() {
             return "example";
         }
     }
@@ -186,7 +186,7 @@ public static class StubResponseTransformerWithParams extends ResponseTransforme
         }
 
         @Override
-        public String name() {
+        public String getName() {
             return "stub-transformer-with-params";
         }
 }
@@ -217,6 +217,18 @@ wireMockServer.stubFor(requestMatching(new RequestMatcherExtension() {
     }
 }).willReturn(aResponse().withStatus(422)));
 ```
+
+
+To use it in a verification :
+```java
+verify(2, requestMadeFor(new ValueMatcher<Request>() {
+    @Override
+    public MatchResult match(Request value) {
+        return MatchResult.of(request.getBody().length > 2048);
+    }
+}));
+```
+
 
 In Java 8 and above this can be achieved using a lambda:
 
@@ -249,7 +261,7 @@ public class BodyLengthMatcher extends RequestMatcherExtension {
 Then define a stub with it:
 
 ```java
-stubFor(requestMatching("body-too-long", Parameters.one("maxLemgth", 2048))
+stubFor(requestMatching("body-too-long", Parameters.one("maxLength", 2048))
         .willReturn(aResponse().withStatus(422)));
 ```
 
@@ -261,7 +273,7 @@ or via JSON:
         "customMatcher" : {
             "name" : "body-too-long",
             "parameters" : {
-                "maxLemgth" : 2048
+                "maxLength" : 2048
             }
         }
     },

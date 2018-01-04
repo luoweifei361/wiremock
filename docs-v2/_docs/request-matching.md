@@ -14,6 +14,7 @@ WireMock supports matching of requests to stubs and verification queries using t
 * Basic authentication (a special case of header matching)
 * Cookies
 * Request body
+* Multipart/form-data
 
 Here's an example showing all attributes being matched using WireMock's in-built match operators. It is also possible to write [custom matching logic](/docs/extending-wiremock/#custom-request-matchers) if
 you need more precise control:
@@ -28,6 +29,12 @@ stubFor(any(urlPathEqualTo("/everything"))
   .withBasicAuth("jeff@example.com", "jeffteenjefftyjeff")
   .withRequestBody(equalToXml("<search-results />"))
   .withRequestBody(matchingXPath("//search-results"))
+  .withMultipartRequestBody(
+  	aMultipart()
+  		.withName("info")
+  		.withHeader("Content-Type", containing("charset"))
+  		.withMultipartBody(equalToJson("{}"))
+  )
   .willReturn(aResponse()));
 ```
 
@@ -57,6 +64,20 @@ JSON:
       "equalToXml" : "<search-results />"
     }, {
       "matchesXPath" : "//search-results"
+    } ],
+    "multipartPatterns" : [ {
+      "matchingType" : "ANY",
+      "headers" : {
+        "Content-Disposition" : {
+          "contains" : "name=\"info\""
+        },
+        "Content-Type" : {
+          "contains" : "charset"
+        }
+      },
+      "bodyPatterns" : [ {
+        "equalToJson" : "{}"
+      } ]
     } ],
     "basicAuthCredentials" : {
       "username" : "jeff@example.com",
@@ -193,6 +214,62 @@ JSON:
 }
 ```
 
+### Case-insensitive equality
+
+Deems a match if the entire attribute value equals the expected value, ignoring case.
+
+Java:
+
+```java
+.withHeader("Content-Type", equalToIgnoreCase("application/json"))
+```
+
+JSON:
+
+```json
+{
+  "request": {
+    ...
+    "headers": {
+      "Content-Type": {
+        "equalTo": "application/json",
+        "caseInsensitive": true
+      }
+    }
+    ...
+  },
+  ...
+}
+```
+
+### Binary Equality
+
+Deems a match if the entire binary attribute value equals the expected value. Unlike the above equalTo operator, this compares byte arrays (or their equivalent base64 representation).
+
+Java:
+
+```java
+// Specifying the expected value as a byte array
+.withRequestBody(binaryEqualTo(new byte[] { 1, 2, 3 }))
+
+// Specifying the expected value as a base64 String
+.withRequestBody(binaryEqualTo("AQID"))
+```
+
+JSON:
+
+```json
+{
+  "request": {
+    ...
+    "bodyPatterns" : [{
+        "binaryEqualTo" : "AQID" // Base 64
+    }]
+    ...
+  },
+  ...
+}
+```
 
 ### Substring (contains)
 
@@ -291,7 +368,7 @@ JSON:
   "request": {
     ...
     "bodyPatterns" : [ {
-      "equalToJson" : "{ \"total_results\": 4 }"
+      "equalToJson" : { "total_results": 4 }
     } ]
     ...
   },
@@ -299,6 +376,20 @@ JSON:
 }
 ```
 
+JSON with string literal:
+
+```json
+{
+  "request": {
+    ...
+    "bodyPatterns" : [ {
+      "equalToJson" : "{ \"total_results\": 4 }"
+    } ]
+    ...
+  },
+  ...
+}
+```
 
 By default different array orderings and additional object attributes will trigger a non-match. However, both of these conditions can be disabled individually.
 
@@ -471,6 +562,72 @@ Request body example:
 { "things": [ { "name": "RequiredThing" } ] }
 ```
 
+#### Nested value matching
+
+The JSONPath matcher can be combined with another matcher, such that the value returned from the JSONPath query is evaluated against it:
+ 
+Java:
+
+```java
+.withRequestBody(matchingJsonPath("$..todoItem", containing("wash")))
+```
+
+JSON:
+
+```json
+{
+  "request": {
+    ...
+    "bodyPatterns" : [ {
+      "matchesJsonPath" : {
+         "expression": "$..todoItem",
+         "contains": "wash"
+      }
+    } ]
+    ...
+  },
+  ...
+}
+```
+
+Since WireMock's matching operators all work on strings, the value selected by the JSONPath expression will be coerced to a string before the match is evaluated. This true even if the returned value
+is an object or array. A benefit of this is that this allows a sub-document to be selected using JSONPath, then matched using the `equalToJson` operator. E.g. for the following request body:
+
+```json
+{
+    "outer": {
+        "inner": 42
+    }
+}
+```
+
+The following will match:
+
+```java
+.withRequestBody(matchingJsonPath("$.outer", equalToJson("{                \n" +
+                                                         "   \"inner\": 42 \n" +
+                                                         "}")))
+```
+
+JSON:
+
+```json
+{
+  "request": {
+    ...
+    "bodyPatterns" : [ {
+      "matchesJsonPath" : {
+         "expression": "$.outer",
+         "equalToJson": "{ \"inner\": 42 }"
+      }
+    } ]
+    ...
+  },
+  ...
+}
+```
+
+
 ### XML equality
 
 Deems a match if the attribute value is valid XML and is semantically equal to the expected XML document. The underlying engine for determining XML equality is [XMLUnit](http://www.xmlunit.org/).
@@ -550,6 +707,63 @@ JSON:
 }
 ```
 
+#### Nested value matching
+
+The XPath matcher described above can be combined with another matcher, such that the value returned from the XPath query is evaluated against it:
+ 
+Java:
+
+```java
+.withRequestBody(matchingXPath("//todo-item/text()", containing("wash")))
+```
+
+JSON:
+
+```json
+{
+  "request": {
+    ...
+    "bodyPatterns" : [ {
+      "matchesXPath" : {
+         "expression": "//todo-item/text()",
+         "contains": "wash"
+      }
+    } ]
+    ...
+  },
+  ...
+}
+```
+
+If multiple nodes are returned from the XPath query, all will be evaluated and the returned match will be the one with the shortest distance.
+ 
+If the XPath expression returns an XML element rather than a value, this will be rendered as an XML string before it is passed to the value matcher.
+This can be usefully combined with the `equalToXml` matcher e.g.
+ 
+Java:
+
+```java
+.withRequestBody(matchingXPath("//todo-item", equalToXml("<todo-item>Do the washing</todo-item>")))
+```
+
+JSON:
+
+```json
+{
+  "request": {
+    ...
+    "bodyPatterns" : [ {
+      "matchesXPath" : {
+         "expression": "//todo-item",
+         "equalToXml": "<todo-item>Do the washing</todo-item>"
+      }
+    } ]
+    ...
+  },
+  ...
+}
+```
+
 ### Absence
 
 Deems a match if the attribute specified is absent from the request.
@@ -589,6 +803,50 @@ JSON:
 }
 ```
 
+## Multipart/form-data
+
+Deems a match if a multipart value is valid and matches any or all the the multipart pattern matchers supplied.   As a Multipart is a 'mini' HTTP request in itself all existing Header and Body content matchers can by applied to a Multipart pattern.
+A Multipart pattern can be defined as matching `ANY` request multiparts or `ALL`. The default matching type is `ANY`.
+
+Java:
+
+```java
+stubFor(...)
+  ...
+  .withMultipartRequestBody(
+  	aMultipart()
+  		.withName("info")
+  		.withHeader("Content-Type", containing("charset"))
+  		.withMultipartBody(equalToJson("{}"))
+  )
+```
+
+JSON:
+
+```json
+{
+  "request": {
+    ...
+    "multipartPatterns" : [ {
+      "matchingType" : "ANY",
+      "headers" : {
+        "Content-Disposition" : {
+          "contains" : "name=\"info\""
+        },
+        "Content-Type" : {
+          "contains" : "charset"
+        }
+      },
+      "bodyPatterns" : [ {
+        "equalToJson" : "{}"
+      } ]
+    } ],
+    ...
+  },
+  ...
+}
+```
+
 ## Basic Authentication
 
 Although matching on HTTP basic authentication could be supported via a
@@ -618,3 +876,4 @@ JSON:
     }
 }
 ```
+

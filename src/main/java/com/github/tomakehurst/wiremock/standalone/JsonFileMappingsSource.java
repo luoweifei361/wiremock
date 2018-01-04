@@ -15,7 +15,10 @@
  */
 package com.github.tomakehurst.wiremock.standalone;
 
-import com.github.tomakehurst.wiremock.common.*;
+import com.github.tomakehurst.wiremock.common.AbstractFileSource;
+import com.github.tomakehurst.wiremock.common.FileSource;
+import com.github.tomakehurst.wiremock.common.SafeNames;
+import com.github.tomakehurst.wiremock.common.TextFile;
 import com.github.tomakehurst.wiremock.stubbing.StubMapping;
 import com.github.tomakehurst.wiremock.stubbing.StubMappings;
 
@@ -30,12 +33,10 @@ import static com.google.common.collect.Iterables.filter;
 public class JsonFileMappingsSource implements MappingsSource {
 
 	private final FileSource mappingsFileSource;
-	private final VeryShortIdGenerator idGenerator;
 	private final Map<UUID, String> fileNameMap;
 
 	public JsonFileMappingsSource(FileSource mappingsFileSource) {
 		this.mappingsFileSource = mappingsFileSource;
-		idGenerator = new VeryShortIdGenerator();
 		fileNameMap = new HashMap<>();
 	}
 
@@ -52,7 +53,7 @@ public class JsonFileMappingsSource implements MappingsSource {
 	public void save(StubMapping stubMapping) {
 		String mappingFileName = fileNameMap.get(stubMapping.getId());
 		if (mappingFileName == null) {
-			mappingFileName = "saved-mapping-" + idGenerator.generate() + ".json";
+			mappingFileName = SafeNames.makeSafeFileName(stubMapping);
 		}
 		mappingsFileSource.writeTextFile(mappingFileName, write(stubMapping));
         fileNameMap.put(stubMapping.getId(), mappingFileName);
@@ -84,11 +85,8 @@ public class JsonFileMappingsSource implements MappingsSource {
             StubMapping mapping = StubMapping.buildFrom(mappingFile.readContentsAsString());
             mapping.setDirty(false);
 			stubMappings.addMapping(mapping);
-			fileNameMap.put(mapping.getId(), getFileName(mappingFile));
+			fileNameMap.put(mapping.getId(), mappingFile.getPath());
 		}
 	}
 
-	private String getFileName(TextFile mappingFile) {
-		return mappingFile.getUri().toString().replaceAll("^.*/", "");
-	}
 }

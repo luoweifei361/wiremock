@@ -1,3 +1,18 @@
+/*
+ * Copyright (C) 2011 Thomas Akehurst
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.github.tomakehurst.wiremock;
 
 import com.github.tomakehurst.wiremock.client.MappingBuilder;
@@ -167,6 +182,26 @@ public class StubMappingPersistenceAcceptanceTest {
         removeAllMappings();
 
         assertMappingsDirIsEmpty();
+    }
+
+    @Test
+    public void deletesNestedPersistentStubMapping() throws IOException {
+        UUID stubId = UUID.randomUUID();
+        Path subDirectoryUnderMappingsRoot = Files.createDirectory(mappingsDir.resolve("sub-dir"));
+        Path mappingFilePath = subDirectoryUnderMappingsRoot.resolve("mapping-to-delete.json");
+        writeMappingFile(mappingFilePath.toString(), get(urlEqualTo("/to-delete"))
+            .withId(stubId)
+            .persistent()
+        );
+
+        wireMockServer.resetToDefaultMappings(); // Loads from the file system
+        assertThat(mappingFilePath.toFile().exists(), is(true));
+
+        StubMapping stubMapping = wm.getStubMappings().get(0);
+        assertThat(stubMapping.getId(), is(stubId));
+
+        removeStub(stubMapping);
+        assertThat(mappingFilePath.toFile().exists(), is(false));
     }
 
     private void writeMappingFile(String name, MappingBuilder stubBuilder) throws IOException {

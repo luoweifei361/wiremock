@@ -1,5 +1,21 @@
+/*
+ * Copyright (C) 2011 Thomas Akehurst
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.github.tomakehurst.wiremock.matching;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.base.Function;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
@@ -54,13 +70,7 @@ public class StringValuePatternTest {
 
 
         for (Class<?> clazz: classes) {
-            Constructor<?> constructor = findConstructorWithStringParamInFirstPosition(clazz);
-            Stopwatch stopwatch = Stopwatch.createStarted();
-            assertThat(constructor
-                .getParameterAnnotations()[0][0]
-                .annotationType()
-                .getSimpleName(), is("JsonProperty"));
-            stopwatch.stop();
+            findConstructorWithStringParamInFirstPosition(clazz);
         }
 
     }
@@ -69,7 +79,11 @@ public class StringValuePatternTest {
         return Iterables.find(asList(clazz.getConstructors()), new Predicate<Constructor<?>>() {
             @Override
             public boolean apply(Constructor<?> input) {
-                return input.getParameterTypes().length > 0 && input.getParameterTypes()[0].equals(String.class);
+                return input.getParameterTypes().length > 0 &&
+                       input.getParameterTypes()[0].equals(String.class) &&
+                       input.getParameterAnnotations().length > 0 &&
+                       input.getParameterAnnotations()[0].length > 0 &&
+                       input.getParameterAnnotations()[0][0].annotationType().equals(JsonProperty.class) ;
             }
         });
     }

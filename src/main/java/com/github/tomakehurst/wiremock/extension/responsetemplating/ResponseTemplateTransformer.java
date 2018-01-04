@@ -1,3 +1,18 @@
+/*
+ * Copyright (C) 2011 Thomas Akehurst
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.github.tomakehurst.wiremock.extension.responsetemplating;
 
 import com.github.jknack.handlebars.Handlebars;
@@ -9,6 +24,7 @@ import com.github.tomakehurst.wiremock.common.FileSource;
 import com.github.tomakehurst.wiremock.common.TextFile;
 import com.github.tomakehurst.wiremock.extension.Parameters;
 import com.github.tomakehurst.wiremock.extension.ResponseDefinitionTransformer;
+import com.github.tomakehurst.wiremock.extension.responsetemplating.helpers.WiremockHelpers;
 import com.github.tomakehurst.wiremock.http.HttpHeader;
 import com.github.tomakehurst.wiremock.http.HttpHeaders;
 import com.github.tomakehurst.wiremock.http.Request;
@@ -40,15 +56,24 @@ public class ResponseTemplateTransformer extends ResponseDefinitionTransformer {
     }
 
     public ResponseTemplateTransformer(boolean global, Map<String, Helper> helpers) {
+        this(global, new Handlebars(), helpers);
+    }
+
+    public ResponseTemplateTransformer(boolean global, Handlebars handlebars, Map<String, Helper> helpers) {
         this.global = global;
-        handlebars = new Handlebars();
+        this.handlebars = handlebars;
 
         for (StringHelpers helper: StringHelpers.values()) {
-            handlebars.registerHelper(helper.name(), helper);
+            this.handlebars.registerHelper(helper.name(), helper);
+        }
+
+        //Add all available wiremock helpers
+        for(WiremockHelpers helper: WiremockHelpers.values()){
+            this.handlebars.registerHelper(helper.name(), helper);
         }
 
         for (Map.Entry<String, Helper> entry: helpers.entrySet()) {
-            handlebars.registerHelper(entry.getKey(), entry.getValue());
+            this.handlebars.registerHelper(entry.getKey(), entry.getValue());
         }
     }
 

@@ -31,6 +31,7 @@ import java.util.Map;
 import com.github.tomakehurst.wiremock.common.*;
 import com.github.tomakehurst.wiremock.extension.ResponseDefinitionTransformer;
 import com.github.tomakehurst.wiremock.extension.responsetemplating.ResponseTemplateTransformer;
+import com.github.tomakehurst.wiremock.http.ThreadPoolFactory;
 import com.github.tomakehurst.wiremock.http.trafficlistener.DoNothingWiremockNetworkTrafficListener;
 import com.github.tomakehurst.wiremock.core.MappingsSaver;
 import com.github.tomakehurst.wiremock.core.Options;
@@ -41,6 +42,12 @@ import com.github.tomakehurst.wiremock.http.CaseInsensitiveKey;
 import com.github.tomakehurst.wiremock.http.HttpServerFactory;
 import com.github.tomakehurst.wiremock.http.trafficlistener.ConsoleNotifyingWiremockNetworkTrafficListener;
 import com.github.tomakehurst.wiremock.http.trafficlistener.WiremockNetworkTrafficListener;
+import com.github.tomakehurst.wiremock.jetty9.QueuedThreadPoolFactory;
+import com.github.tomakehurst.wiremock.security.Authenticator;
+import com.github.tomakehurst.wiremock.security.BasicAuthenticator;
+import com.github.tomakehurst.wiremock.security.NoAuthenticator;
+import com.github.tomakehurst.wiremock.verification.notmatched.NotMatchedRenderer;
+import com.github.tomakehurst.wiremock.verification.notmatched.PlainTextStubNotMatchedRenderer;
 import com.google.common.base.Optional;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
@@ -54,7 +61,7 @@ import joptsimple.OptionParser;
 import joptsimple.OptionSet;
 
 public class CommandLineOptions implements Options {
-	
+
 	private static final String HELP = "help";
 	private static final String RECORD_MAPPINGS = "record-mappings";
 	private static final String MATCH_HEADERS = "match-headers";
@@ -78,10 +85,15 @@ public class CommandLineOptions implements Options {
     private static final String PRINT_ALL_NETWORK_TRAFFIC = "print-all-network-traffic";
     private static final String JETTY_ACCEPT_QUEUE_SIZE = "jetty-accept-queue-size";
     private static final String JETTY_HEADER_BUFFER_SIZE = "jetty-header-buffer-size";
+    private static final String JETTY_STOP_TIMEOUT = "jetty-stop-timeout";
     private static final String ROOT_DIR = "root-dir";
     private static final String CONTAINER_THREADS = "container-threads";
     private static final String GLOBAL_RESPONSE_TEMPLATING = "global-response-templating";
     private static final String LOCAL_RESPONSE_TEMPLATING = "local-response-templating";
+    private static final String ADMIN_API_BASIC_AUTH = "admin-api-basic-auth";
+    private static final String ADMIN_API_REQUIRE_HTTPS = "admin-api-require-https";
+    private static final String ASYNCHRONOUS_RESPONSE_ENABLED = "async-response-enabled";
+    private static final String ASYNCHRONOUS_RESPONSE_THREADS = "async-response-threads";
 
     private final OptionSet optionSet;
     private final FileSource fileSource;
@@ -114,12 +126,17 @@ public class CommandLineOptions implements Options {
         optionParser.accepts(JETTY_ACCEPTOR_THREAD_COUNT, "Number of Jetty acceptor threads").withRequiredArg();
         optionParser.accepts(JETTY_ACCEPT_QUEUE_SIZE, "The size of Jetty's accept queue size").withRequiredArg();
         optionParser.accepts(JETTY_HEADER_BUFFER_SIZE, "The size of Jetty's buffer for request headers").withRequiredArg();
+        optionParser.accepts(JETTY_STOP_TIMEOUT, "Timeout in milliseconds for Jetty to stop").withRequiredArg();
         optionParser.accepts(PRINT_ALL_NETWORK_TRAFFIC, "Print all raw incoming and outgoing network traffic to console");
         optionParser.accepts(GLOBAL_RESPONSE_TEMPLATING, "Preprocess all responses with Handlebars templates");
         optionParser.accepts(LOCAL_RESPONSE_TEMPLATING, "Preprocess selected responses with Handlebars templates");
+        optionParser.accepts(ADMIN_API_BASIC_AUTH, "Require HTTP Basic authentication for admin API calls with the supplied credentials in username:password format").withRequiredArg();
+        optionParser.accepts(ADMIN_API_REQUIRE_HTTPS, "Require HTTPS to be used to access the admin API");
+        optionParser.accepts(ASYNCHRONOUS_RESPONSE_ENABLED, "Enable asynchronous response").withRequiredArg().defaultsTo("false");
+        optionParser.accepts(ASYNCHRONOUS_RESPONSE_THREADS, "Number of asynchronous response threads").withRequiredArg().defaultsTo("10");
 
         optionParser.accepts(HELP, "Print this message");
-		
+
 		optionSet = optionParser.parse(args);
         validate();
 		captureHelpTextIfRequested(optionParser);
@@ -146,19 +163,19 @@ public class CommandLineOptions implements Options {
 			} catch (IOException e) {
 				throw new RuntimeException(e);
 			}
-			
+
 			helpText = out.toString();
 		}
 	}
-	
+
 	public boolean verboseLoggingEnabled() {
 		return optionSet.has(VERBOSE);
 	}
-	
+
 	public boolean recordMappingsEnabled() {
 		return optionSet.has(RECORD_MAPPINGS);
 	}
-	
+
 	@Override
 	public List<CaseInsensitiveKey> matchingHeaders() {
 		if (optionSet.hasArgument(MATCH_HEADERS)) {
@@ -183,10 +200,15 @@ public class CommandLineOptions implements Options {
         }
     }
 
+    @Override
+    public ThreadPoolFactory threadPoolFactory() {
+        return new QueuedThreadPoolFactory();
+    }
+
     private boolean specifiesPortNumber() {
 		return optionSet.has(PORT);
 	}
-	
+
 	@Override
     public int portNumber() {
         if (specifiesPortNumber()) {
@@ -233,6 +255,10 @@ public class CommandLineOptions implements Options {
             builder = builder.withRequestHeaderSize(Integer.parseInt((String) optionSet.valueOf(JETTY_HEADER_BUFFER_SIZE)));
         }
 
+        if (optionSet.hasArgument(JETTY_STOP_TIMEOUT)) {
+            builder = builder.withStopTimeout(Long.parseLong((String) optionSet.valueOf(JETTY_STOP_TIMEOUT)));
+        }
+
         return builder.build();
     }
 
@@ -245,7 +271,7 @@ public class CommandLineOptions implements Options {
     public boolean help() {
 		return optionSet.has(HELP);
 	}
-	
+
 	public String helpText() {
 		return helpText;
 	}
@@ -298,6 +324,30 @@ public class CommandLineOptions implements Options {
         } else {
             return new DoNothingWiremockNetworkTrafficListener();
         }
+    }
+
+    @Override
+    public Authenticator getAdminAuthenticator() {
+        if (optionSet.has(ADMIN_API_BASIC_AUTH)) {
+            String[] parts = ((String) optionSet.valueOf(ADMIN_API_BASIC_AUTH)).split(":");
+            if (parts.length != 2) {
+                throw new IllegalArgumentException("Admin API credentials must be in the format username:password");
+            }
+
+            return new BasicAuthenticator(parts[0], parts[1]);
+        }
+
+        return new NoAuthenticator();
+    }
+
+    @Override
+    public boolean getHttpsRequiredForAdminApi() {
+        return optionSet.has(ADMIN_API_REQUIRE_HTTPS);
+    }
+
+    @Override
+    public NotMatchedRenderer getNotMatchedRenderer() {
+        return new PlainTextStubNotMatchedRenderer();
     }
 
     @Override
@@ -401,6 +451,14 @@ public class CommandLineOptions implements Options {
             builder.put(JETTY_HEADER_BUFFER_SIZE, jettySettings().getRequestHeaderSize().get());
         }
 
+        if (!(getAdminAuthenticator() instanceof NoAuthenticator)) {
+            builder.put(ADMIN_API_BASIC_AUTH, "enabled");
+        }
+
+        if (getHttpsRequiredForAdminApi()) {
+            builder.put(ADMIN_API_REQUIRE_HTTPS, "true");
+        }
+
         StringBuilder sb = new StringBuilder();
         for (Map.Entry<String, Object> param: builder.build().entrySet()) {
             int paddingLength = 29 - param.getKey().length();
@@ -421,4 +479,20 @@ public class CommandLineOptions implements Options {
 
         return value.toString();
     }
+
+    @Override
+    public AsynchronousResponseSettings getAsynchronousResponseSettings() {
+        return new AsynchronousResponseSettings(isAsynchronousResponseEnabled(), getAsynchronousResponseThreads());
+    }
+
+    private boolean isAsynchronousResponseEnabled() {
+        return optionSet.has(ASYNCHRONOUS_RESPONSE_ENABLED) ?
+                Boolean.valueOf((String) optionSet.valueOf(ASYNCHRONOUS_RESPONSE_ENABLED)) :
+                false;
+    }
+
+    private int getAsynchronousResponseThreads() {
+        return Integer.valueOf((String) optionSet.valueOf(ASYNCHRONOUS_RESPONSE_THREADS));
+    }
+
 }

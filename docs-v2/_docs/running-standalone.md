@@ -6,6 +6,13 @@ redirect_from: "/running-standalone.html"
 description: Running WireMock as a standalone mock server.
 ---
 
+<div class="mocklab-callout"> 
+  <p class="mocklab-callout__text">
+    Configuring servers can be a major distraction from building great software. <strong>MockLab</strong> provides a hosted, 100% WireMock compatible mocking service, freeing you from the hassles of SSL, DNS and server configuration.    
+  </p>
+  <a href="http://get.mocklab.io/?utm_source=wiremock.org&utm_medium=docs-callout&utm_campaign=running-standalone" title="Learn more" class="mocklab-callout__learn-more-button">Learn more</a>
+</div>
+
 The WireMock server can be run in its own process, and configured via
 the Java API, JSON over HTTP or JSON files.
 
@@ -96,12 +103,19 @@ accepting requests.
 `--jetty-header-buffer-size`: The Jetty buffer size for request headers,
 e.g. `--jetty-header-buffer-size 16384`, defaults to 8192K.
 
+`--async-response-enabled`: Enable asynchronous request processing in Jetty. 
+Recommended when using WireMock for performance testing with delays, as it allows much more efficient use of container threads and therefore higher throughput. Defaults to `false`.
+
+`--async-response-threads`: Set the number of asynchronous (background) response threads. 
+Effective only with `asynchronousResponseEnabled=true`. Defaults to 10.
+
 `--extensions`: Extension class names e.g.
 com.mycorp.HeaderTransformer,com.mycorp.BodyTransformer. See extending-wiremock.
 
 `--print-all-network-traffic`: Print all raw incoming and outgoing network traffic to console.
 
 `--global-response-templating`: Render all response definitions using Handlebars templates.
+
 `--local-response-templating`: Enable rendering of response definitions using Handlebars templates for specific stub mappings.
 
 `--help`: Show command line help
@@ -118,6 +132,7 @@ WireMock.configureFor("https", "my.remote.host", 8443);
 ```
 
 Alternatively you can create an instance of the client (or as many as there are servers to configure):
+
 ```java
 WireMock wireMock1 = new WireMock("1st.remote.host", 8000);
 WireMock wireMock2 = new WireMock("https", "2nd.remote.host", 8001);
@@ -171,7 +186,7 @@ $ curl http://localhost:8080/api/mytest
 More content
 ```
 
-See stubbing and verifying for more on the JSON API.
+See [stubbing](/docs/stubbing/) and [verifying](/docs/verifying/) for more on the JSON API.
 
 
 ## Pushing JSON files to a remote WireMock instance
@@ -180,7 +195,7 @@ You can push a collection of mappings to a remote
 
 ## File serving
 
-When running standalone files placed under the `__files` directory will
+When running the standalone JAR, files placed under the `__files` directory will
 be served up as if from under the docroot, except if stub mapping
 matching the URL exists. For example if a file exists
 `__files/things/myfile.html` and no stub mapping will match

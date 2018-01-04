@@ -29,6 +29,7 @@ import org.apache.http.client.protocol.HttpClientContext;
 import org.apache.http.entity.ContentType;
 import org.apache.http.entity.InputStreamEntity;
 import org.apache.http.entity.StringEntity;
+import org.apache.http.entity.mime.MultipartEntityBuilder;
 import org.apache.http.impl.auth.BasicScheme;
 import org.apache.http.impl.client.BasicAuthCache;
 import org.apache.http.impl.client.BasicCredentialsProvider;
@@ -38,14 +39,14 @@ import org.apache.http.impl.client.HttpClients;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.net.URI;
+import java.util.Collection;
 
 import static com.github.tomakehurst.wiremock.common.Exceptions.throwUnchecked;
 import static com.github.tomakehurst.wiremock.http.MimeType.JSON;
 import static com.google.common.base.Strings.isNullOrEmpty;
-import static java.net.HttpURLConnection.HTTP_CREATED;
-import static java.net.HttpURLConnection.HTTP_NO_CONTENT;
-import static java.net.HttpURLConnection.HTTP_OK;
+import static java.net.HttpURLConnection.*;
 import static org.apache.http.entity.ContentType.APPLICATION_JSON;
+import static org.apache.http.entity.ContentType.APPLICATION_XML;
 
 public class WireMockTestClient {
 
@@ -55,6 +56,7 @@ public class WireMockTestClient {
     private static final String LOCAL_WIREMOCK_EDIT_RESPONSE_URL = "http://%s:%d/__admin/mappings/edit";
     private static final String LOCAL_WIREMOCK_RESET_URL = "http://%s:%d/__admin/reset";
     private static final String LOCAL_WIREMOCK_RESET_DEFAULT_MAPPINS_URL = "http://%s:%d/__admin/mappings/reset";
+    private static final String LOCAL_WIREMOCK_SNAPSHOT_PATH = "/__admin/recordings/snapshot";
 
     private int port;
     private String address;
@@ -148,6 +150,18 @@ public class WireMockTestClient {
         return post(url, new StringEntity(body, ContentType.create(bodyMimeType, bodyEncoding)));
     }
 
+    public WireMockResponse postWithMultiparts(String url, Collection<MultipartBody> parts, TestHttpHeader... headers) {
+        MultipartEntityBuilder builder = MultipartEntityBuilder.create();
+
+        if (parts != null) {
+            for (MultipartBody part : parts) {
+                builder.addPart(part.getFilename(), part);
+            }
+        }
+
+        return post(url, builder.build(), headers);
+    }
+
     public WireMockResponse postWithChunkedBody(String url, byte[] body) {
         return post(url, new InputStreamEntity(new ByteArrayInputStream(body), -1));
     }
@@ -161,6 +175,12 @@ public class WireMockTestClient {
     public WireMockResponse postJson(String url, String body, TestHttpHeader... headers) {
         HttpPost httpPost = new HttpPost(mockServiceUrlFor(url));
         httpPost.setEntity(new StringEntity(body, APPLICATION_JSON));
+        return executeMethodAndConvertExceptions(httpPost, headers);
+    }
+
+    public WireMockResponse postXml(String url, String body, TestHttpHeader... headers) {
+        HttpPost httpPost = new HttpPost(mockServiceUrlFor(url));
+        httpPost.setEntity(new StringEntity(body, APPLICATION_XML));
         return executeMethodAndConvertExceptions(httpPost, headers);
     }
 
@@ -185,7 +205,11 @@ public class WireMockTestClient {
     }
 
     public void addResponse(String responseSpecJson) {
-        int status = postJsonAndReturnStatus(newMappingUrl(), responseSpecJson);
+        addResponse(responseSpecJson, "utf-8");
+    }
+
+    public void addResponse(String responseSpecJson, String charset) {
+        int status = postJsonAndReturnStatus(newMappingUrl(), responseSpecJson, charset);
         if (status != HTTP_CREATED) {
             throw new RuntimeException("Returned status code was " + status);
         }
@@ -205,11 +229,23 @@ public class WireMockTestClient {
         }
     }
 
+    public String snapshot(String snapshotSpecJson) {
+        WireMockResponse response = postJson(LOCAL_WIREMOCK_SNAPSHOT_PATH, snapshotSpecJson);
+        if (response.statusCode() != HTTP_OK) {
+            throw new RuntimeException("Returned status code was " + response.statusCode());
+        }
+        return response.content();
+    }
+
     private int postJsonAndReturnStatus(String url, String json) {
+        return postJsonAndReturnStatus(url, json, "utf-8");
+    }
+
+    private int postJsonAndReturnStatus(String url, String json, String charset) {
         HttpPost post = new HttpPost(url);
         try {
             if (json != null) {
-                post.setEntity(new StringEntity(json, ContentType.create(JSON.toString(), "utf-8")));
+                post.setEntity(new StringEntity(json, ContentType.create(JSON.toString(), charset)));
             }
             HttpResponse httpResponse = httpClient().execute(post);
             return httpResponse.getStatusLine().getStatusCode();

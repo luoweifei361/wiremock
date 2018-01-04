@@ -15,6 +15,7 @@
  */
 package com.github.tomakehurst.wiremock.matching;
 
+import com.github.tomakehurst.wiremock.common.Strings;
 import com.github.tomakehurst.wiremock.common.Urls;
 import com.github.tomakehurst.wiremock.http.ContentTypeHeader;
 import com.github.tomakehurst.wiremock.http.Cookie;
@@ -23,17 +24,31 @@ import com.github.tomakehurst.wiremock.http.HttpHeaders;
 import com.github.tomakehurst.wiremock.http.QueryParameter;
 import com.github.tomakehurst.wiremock.http.Request;
 import com.github.tomakehurst.wiremock.http.RequestMethod;
+import com.github.tomakehurst.wiremock.jetty9.MultipartParser;
+import com.github.tomakehurst.wiremock.servlet.WireMockHttpServletMultipartAdapter;
 import com.github.tomakehurst.wiremock.verification.LoggedRequest;
+import com.google.common.base.Function;
+import com.google.common.base.Optional;
 import com.google.common.base.Predicate;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.net.URI;
+import java.util.Collection;
 import java.util.Map;
 import java.util.Set;
+import javax.servlet.ServletException;
+import org.eclipse.jetty.util.MultiPartInputStreamParser;
 
+import static com.github.tomakehurst.wiremock.common.Strings.bytesFromString;
 import static com.github.tomakehurst.wiremock.http.HttpHeader.httpHeader;
 import static com.google.common.base.Charsets.UTF_8;
+import static com.google.common.collect.FluentIterable.from;
 import static com.google.common.collect.Iterables.tryFind;
+import static com.google.common.collect.Lists.newArrayList;
 import static com.google.common.collect.Maps.newHashMap;
+import static java.util.Arrays.asList;
+import static java.util.Collections.emptyList;
 
 public class MockRequest implements Request {
 
@@ -43,6 +58,7 @@ public class MockRequest implements Request {
     private Map<String, Cookie> cookies = newHashMap();
     private byte[] body;
     private String clientIp = "1.1.1.1";
+    private Collection<Part> multiparts = null;
 
     public static MockRequest mockRequest() {
         return new MockRequest();
@@ -63,8 +79,8 @@ public class MockRequest implements Request {
         return this;
     }
 
-    public MockRequest cookie(String key, String value) {
-        cookies.put(key, new Cookie(value));
+    public MockRequest cookie(String key, String... values) {
+        cookies.put(key, new Cookie(asList(values)));
         return this;
     }
 
@@ -73,8 +89,27 @@ public class MockRequest implements Request {
         return this;
     }
 
+    public MockRequest body(byte[] body) {
+        this.body = body;
+        return this;
+    }
+
     public MockRequest clientIp(String clientIp) {
         this.clientIp = clientIp;
+        return this;
+    }
+
+    public MockRequest parts(Collection<Part> multiparts) {
+        this.multiparts = multiparts;
+        return this;
+    }
+
+    public MockRequest part(MockMultipart part) {
+        if (multiparts == null) {
+            multiparts = newArrayList();
+        }
+
+        multiparts.add(part);
         return this;
     }
 
@@ -163,7 +198,43 @@ public class MockRequest implements Request {
         return false;
     }
 
+    @Override
+    public Optional<Request> getOriginalRequest() {
+        return Optional.absent();
+    }
+
     public LoggedRequest asLoggedRequest() {
         return LoggedRequest.createFrom(this);
+    }
+
+    @Override
+    public boolean isMultipart() {
+        return getParts() != null;
+    }
+
+    @Override
+    public Collection<Part> getParts() {
+        return multiparts;
+    }
+
+    @Override
+    public Part getPart(final String name) {
+        return (getParts() != null && name != null) ? from(multiparts).firstMatch(new Predicate<Part>() {
+            @Override
+            public boolean apply(Part input) {
+                if (name.equals(input.getName())) {
+                    return true;
+                }
+                return false;
+            }
+        }).get() : null;
+    }
+
+    public MockRequest multipartBody(String body) {
+        ContentTypeHeader contentTypeHeader = headers.getContentTypeHeader();
+        String contentType = contentTypeHeader.isPresent() ? contentTypeHeader.firstValue() : "multipart/form-data; boundary=BOUNDARY";
+        this.multiparts = MultipartParser.parse(bytesFromString(body), contentType);
+
+        return this;
     }
 }

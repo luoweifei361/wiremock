@@ -86,12 +86,18 @@ class BasicMappingBuilder implements ScenarioMappingBuilder {
     }
 
 	@Override
-	public BasicMappingBuilder withRequestBody(StringValuePattern bodyPattern) {
+	public BasicMappingBuilder withRequestBody(ContentPattern<?> bodyPattern) {
         requestPatternBuilder.withRequestBody(bodyPattern);
 		return this;
 	}
 
-	@Override
+    @Override
+    public BasicMappingBuilder withMultipartRequestBody(MultipartValuePatternBuilder multipartPatternBuilder) {
+        requestPatternBuilder.withRequestBodyPart(multipartPatternBuilder.build());
+        return this;
+    }
+
+    @Override
     public BasicMappingBuilder inScenario(String scenarioName) {
         checkArgument(scenarioName != null, "Scenario name must not be null");
 

@@ -15,6 +15,7 @@
  */
 package com.github.tomakehurst.wiremock.jetty9;
 
+import com.github.tomakehurst.wiremock.common.AsynchronousResponseSettings;
 import com.github.tomakehurst.wiremock.common.FileSource;
 import com.github.tomakehurst.wiremock.common.HttpsSettings;
 import com.github.tomakehurst.wiremock.common.JettySettings;
@@ -26,10 +27,8 @@ import com.github.tomakehurst.wiremock.http.HttpServer;
 import com.github.tomakehurst.wiremock.http.RequestHandler;
 import com.github.tomakehurst.wiremock.http.StubRequestHandler;
 import com.github.tomakehurst.wiremock.http.trafficlistener.WiremockNetworkTrafficListener;
-import com.github.tomakehurst.wiremock.servlet.ContentTypeSettingFilter;
-import com.github.tomakehurst.wiremock.servlet.FaultInjectorFactory;
-import com.github.tomakehurst.wiremock.servlet.TrailingSlashFilter;
-import com.github.tomakehurst.wiremock.servlet.WireMockHandlerDispatchingServlet;
+import com.github.tomakehurst.wiremock.servlet.*;
+import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.io.Resources;
 import org.apache.commons.lang3.ArrayUtils;
@@ -37,10 +36,7 @@ import org.eclipse.jetty.http.MimeTypes;
 import org.eclipse.jetty.io.NetworkTrafficListener;
 import org.eclipse.jetty.server.*;
 import org.eclipse.jetty.server.handler.HandlerCollection;
-import org.eclipse.jetty.servlet.DefaultServlet;
-import org.eclipse.jetty.servlet.FilterHolder;
-import org.eclipse.jetty.servlet.ServletContextHandler;
-import org.eclipse.jetty.servlet.ServletHolder;
+import org.eclipse.jetty.servlet.*;
 import org.eclipse.jetty.servlets.CrossOriginFilter;
 import org.eclipse.jetty.servlets.GzipFilter;
 import org.eclipse.jetty.util.thread.QueuedThreadPool;
@@ -89,7 +85,7 @@ public class JettyHttpServer implements HttpServer {
 
         jettyServer.setHandler(createHandler(options, adminRequestHandler, stubRequestHandler));
 
-        finalizeSetup();
+        finalizeSetup(options);
     }
 
     protected HandlerCollection createHandler(Options options, AdminRequestHandler adminRequestHandler, StubRequestHandler stubRequestHandler) {
@@ -101,6 +97,7 @@ public class JettyHttpServer implements HttpServer {
         ServletContextHandler mockServiceContext = addMockServiceContext(
                 stubRequestHandler,
                 options.filesRoot(),
+                options.getAsynchronousResponseSettings(),
                 notifier
         );
 
@@ -109,12 +106,20 @@ public class JettyHttpServer implements HttpServer {
         return handlers;
     }
 
-    protected void finalizeSetup() {
-        jettyServer.setStopTimeout(0);
+    protected void finalizeSetup(Options options) {
+        if(!options.jettySettings().getStopTimeout().isPresent()) {
+            jettyServer.setStopTimeout(0);
+        }
     }
 
     protected Server createServer(Options options) {
-        return new Server(new QueuedThreadPool(options.containerThreads()));
+        final Server server = new Server(options.threadPoolFactory().buildThreadPool(options));
+        final JettySettings jettySettings = options.jettySettings();
+        final Optional<Long> stopTimeout = jettySettings.getStopTimeout();
+        if(stopTimeout.isPresent()) {
+            server.setStopTimeout(stopTimeout.get());
+        }
+        return server;
     }
 
     /**
@@ -167,6 +172,10 @@ public class JettyHttpServer implements HttpServer {
     @Override
     public int httpsPort() {
         return httpsConnector.getLocalPort();
+    }
+
+    protected long stopTimeout() {
+        return jettyServer.getStopTimeout();
     }
 
     protected ServerConnector createHttpConnector(
@@ -268,10 +277,11 @@ public class JettyHttpServer implements HttpServer {
         }
     }
 
-    @SuppressWarnings({"rawtypes", "unchecked" })
+    @SuppressWarnings({"rawtypes", "unchecked"})
     private ServletContextHandler addMockServiceContext(
             StubRequestHandler stubRequestHandler,
             FileSource fileSource,
+            AsynchronousResponseSettings asynchronousResponseSettings,
             Notifier notifier
     ) {
         ServletContextHandler mockServiceContext = new ServletContextHandler(jettyServer, "/");
@@ -289,6 +299,8 @@ public class JettyHttpServer implements HttpServer {
         servletHolder.setInitParameter(RequestHandler.HANDLER_CLASS_KEY, StubRequestHandler.class.getName());
         servletHolder.setInitParameter(FaultInjectorFactory.INJECTOR_CLASS_KEY, JettyFaultInjectorFactory.class.getName());
         servletHolder.setInitParameter(WireMockHandlerDispatchingServlet.SHOULD_FORWARD_TO_FILES_CONTEXT, "true");
+        servletHolder.setInitParameter(WireMockHandlerDispatchingServlet.ASYNCHRONOUS_RESPONSE_ENABLED, Boolean.toString(asynchronousResponseSettings.isEnabled()));
+        servletHolder.setInitParameter(WireMockHandlerDispatchingServlet.ASYNCHRONOUS_RESPONSE_THREADS, Integer.toString(asynchronousResponseSettings.getThreads()));
 
         MimeTypes mimeTypes = new MimeTypes();
         mimeTypes.addMimeMapping("json", "application/json");
@@ -296,8 +308,9 @@ public class JettyHttpServer implements HttpServer {
         mimeTypes.addMimeMapping("xml", "application/xml");
         mimeTypes.addMimeMapping("txt", "text/plain");
         mockServiceContext.setMimeTypes(mimeTypes);
-
         mockServiceContext.setWelcomeFiles(new String[]{"index.json", "index.html", "index.xml", "index.txt"});
+
+        mockServiceContext.setErrorHandler(new NotFoundHandler());
 
         mockServiceContext.addFilter(GzipFilter.class, "/*", EnumSet.of(DispatcherType.REQUEST, DispatcherType.FORWARD));
         mockServiceContext.addFilter(ContentTypeSettingFilter.class, FILES_URL_MATCH, EnumSet.of(DispatcherType.FORWARD));
@@ -329,6 +342,7 @@ public class JettyHttpServer implements HttpServer {
 
         adminContext.setInitParameter("org.eclipse.jetty.servlet.Default.dirAllowed", "false");
         adminContext.addServlet(DefaultServlet.class, "/swagger-ui/*");
+        adminContext.addServlet(DefaultServlet.class, "/recorder/*");
 
         ServletHolder servletHolder = adminContext.addServlet(WireMockHandlerDispatchingServlet.class, "/");
         servletHolder.setInitParameter(RequestHandler.HANDLER_CLASS_KEY, AdminRequestHandler.class.getName());

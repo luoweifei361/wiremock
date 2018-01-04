@@ -15,12 +15,10 @@
  */
 package com.github.tomakehurst.wiremock.http;
 
+import com.github.tomakehurst.wiremock.common.Strings;
 import com.google.common.base.Optional;
 
-import java.nio.charset.Charset;
-
 import static com.github.tomakehurst.wiremock.http.HttpHeaders.noHeaders;
-import static com.google.common.base.Charsets.UTF_8;
 import static java.net.HttpURLConnection.HTTP_NOT_FOUND;
 import static java.net.HttpURLConnection.HTTP_OK;
 
@@ -33,6 +31,8 @@ public class Response {
 	private final boolean configured;
 	private final Fault fault;
 	private final boolean fromProxy;
+	private final long initialDelay;
+    private final ChunkedDribbleDelay chunkedDribbleDelay;
 
 	public static Response notConfigured() {
         return new Response(
@@ -42,31 +42,38 @@ public class Response {
                 noHeaders(),
                 false,
                 null,
-                false
-        );
-	}
+                0,
+                null,
+                false);
+    }
 
     public static Builder response() {
         return new Builder();
     }
 
-	public Response(int status, String statusMessage, byte[] body, HttpHeaders headers, boolean configured, Fault fault, boolean fromProxy) {
-		this.status = status;
+    public Response(int status, String statusMessage, byte[] body, HttpHeaders headers, boolean configured, Fault fault, long initialDelay,
+                    ChunkedDribbleDelay chunkedDribbleDelay, boolean fromProxy) {
+        this.status = status;
         this.statusMessage = statusMessage;
         this.body = body;
         this.headers = headers;
         this.configured = configured;
         this.fault = fault;
+        this.initialDelay = initialDelay;
+        this.chunkedDribbleDelay = chunkedDribbleDelay;
         this.fromProxy = fromProxy;
     }
 
-    public Response(int status, String statusMessage, String body, HttpHeaders headers, boolean configured, Fault fault, boolean fromProxy) {
+    public Response(int status, String statusMessage, String body, HttpHeaders headers, boolean configured, Fault fault, long initialDelay,
+                    ChunkedDribbleDelay chunkedDribbleDelay, boolean fromProxy) {
         this.status = status;
         this.statusMessage = statusMessage;
         this.headers = headers;
-        this.body = body == null ? null : body.getBytes(encodingFromContentTypeHeaderOrUtf8());
+        this.body = body == null ? null : Strings.bytesFromString(body, headers.getContentTypeHeader().charset());
         this.configured = configured;
         this.fault = fault;
+        this.initialDelay = initialDelay;
+        this.chunkedDribbleDelay = chunkedDribbleDelay;
         this.fromProxy = fromProxy;
     }
 
@@ -81,11 +88,11 @@ public class Response {
     public byte[] getBody() {
         return body;
     }
-	
+
 	public String getBodyAsString() {
-        return new String(body, encodingFromContentTypeHeaderOrUtf8());
+        return Strings.stringFromBytes(body, headers.getContentTypeHeader().charset());
 	}
-	
+
 	public HttpHeaders getHeaders() {
 		return headers;
 	}
@@ -94,15 +101,18 @@ public class Response {
         return fault;
     }
 
-    private Charset encodingFromContentTypeHeaderOrUtf8() {
-        ContentTypeHeader contentTypeHeader = headers.getContentTypeHeader();
-        if (contentTypeHeader.isPresent() && contentTypeHeader.encodingPart().isPresent()) {
-            return Charset.forName(contentTypeHeader.encodingPart().get());
-        }
+    public long getInitialDelay() {
+	    return initialDelay;
+	}
 
-        return UTF_8;
+    public ChunkedDribbleDelay getChunkedDribbleDelay() {
+        return chunkedDribbleDelay;
     }
-	
+
+    public boolean shouldAddChunkedDribbleDelay() {
+        return chunkedDribbleDelay != null;
+    }
+
 	public boolean wasConfigured() {
 		return configured;
 	}
@@ -133,6 +143,8 @@ public class Response {
         private Fault fault;
         private boolean fromProxy;
         private Optional<ResponseDefinition> renderedFromDefinition;
+        private long initialDelay;
+        private ChunkedDribbleDelay chunkedDribbleDelay;
 
         public static Builder like(Response response) {
             Builder responseBuilder = new Builder();
@@ -141,6 +153,8 @@ public class Response {
             responseBuilder.headers = response.getHeaders();
             responseBuilder.configured = response.wasConfigured();
             responseBuilder.fault = response.getFault();
+            responseBuilder.initialDelay = response.getInitialDelay();
+            responseBuilder.chunkedDribbleDelay = response.getChunkedDribbleDelay();
             responseBuilder.fromProxy = response.isFromProxy();
             return responseBuilder;
         }
@@ -194,6 +208,16 @@ public class Response {
             return this;
         }
 
+        public Builder incrementInitialDelay(long amountMillis) {
+            this.initialDelay += amountMillis;
+            return this;
+        }
+
+        public Builder chunkedDribbleDelay(ChunkedDribbleDelay chunkedDribbleDelay) {
+            this.chunkedDribbleDelay = chunkedDribbleDelay;
+            return this;
+        }
+
         public Builder fromProxy(boolean fromProxy) {
             this.fromProxy = fromProxy;
             return this;
@@ -201,11 +225,11 @@ public class Response {
 
         public Response build() {
             if (body != null) {
-                return new Response(status, statusMessage, body, headers, configured, fault, fromProxy);
+                return new Response(status, statusMessage, body, headers, configured, fault, initialDelay, chunkedDribbleDelay, fromProxy);
             } else if (bodyString != null) {
-                return new Response(status, statusMessage, bodyString, headers, configured, fault, fromProxy);
+                return new Response(status, statusMessage, bodyString, headers, configured, fault, initialDelay, chunkedDribbleDelay, fromProxy);
             } else {
-                return new Response(status, statusMessage, new byte[0], headers, configured, fault, fromProxy);
+                return new Response(status, statusMessage, new byte[0], headers, configured, fault, initialDelay, chunkedDribbleDelay, fromProxy);
             }
         }
     }

@@ -15,14 +15,12 @@
  */
 package com.github.tomakehurst.wiremock.matching;
 
-import com.fasterxml.jackson.databind.JsonMappingException;
 import com.github.tomakehurst.wiremock.client.WireMock;
 import com.github.tomakehurst.wiremock.common.Json;
+import com.github.tomakehurst.wiremock.common.JsonException;
 import org.junit.Test;
 
-import static org.hamcrest.Matchers.containsString;
-import static org.hamcrest.Matchers.instanceOf;
-import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.*;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.fail;
 import static org.skyscreamer.jsonassert.JSONAssert.assertEquals;
@@ -48,6 +46,12 @@ public class EqualToPatternTest {
     }
 
     @Test
+    public void matchesCaseInsensitive() {
+        StringValuePattern pattern = WireMock.equalToIgnoreCase("MaTchtHis");
+        assertThat(pattern.match("matchthis").isExactMatch(), is(true));
+    }
+
+    @Test
     public void correctlyDeserialisesEqualToFromJson() {
         StringValuePattern stringValuePattern = Json.read(
             "{                               \n" +
@@ -57,6 +61,20 @@ public class EqualToPatternTest {
 
         assertThat(stringValuePattern, instanceOf(EqualToPattern.class));
         assertThat(stringValuePattern.getValue(), is("something"));
+    }
+
+    @Test
+    public void correctlyDeserialisesEqualToFromJsonWithIgnoreCase() {
+        StringValuePattern stringValuePattern = Json.read(
+            "{                              \n" +
+                "  \"equalTo\": \"something\",   \n" +
+                "  \"caseInsensitive\": true     \n" +
+                "}",
+            StringValuePattern.class);
+
+        assertThat(stringValuePattern, instanceOf(EqualToPattern.class));
+        assertThat(stringValuePattern.getValue(), is("something"));
+        assertThat(((EqualToPattern) stringValuePattern).getCaseInsensitive(), is(true));
     }
 
     @Test
@@ -81,8 +99,9 @@ public class EqualToPatternTest {
 
             fail();
         } catch (Exception e) {
-            assertThat(e, instanceOf(JsonMappingException.class));
-            assertThat(e.getMessage(), containsString("{\"munches\":\"something\"} is not a valid comparison"));
+            assertThat(e, instanceOf(JsonException.class));
+            JsonException jsonException = (JsonException) e;
+            assertThat(jsonException.getErrors().first().getDetail(), containsString("{\"munches\":\"something\"} is not a valid match operation"));
         }
 
     }
